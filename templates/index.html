@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Local File Searcher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1e1e1e;
+    color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    padding: 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    margin-bottom: 20px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  label { min-width: 90px; color: #ccc; }
+
+  input[type="text"], select {
+    background: #2d2d2d;
+    border: 1px solid #555;
+    color: #fff;
+    padding: 7px 10px;
+    border-radius: 5px;
+    flex: 1;
+    min-width: 150px;
+  }
+
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: #0080ff;
+  }
+
+  .checkboxes {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .checkboxes label { min-width: unset; color: #fff; display: flex; align-items: center; gap: 4px; }
+
+  button {
+    background: #0066cc;
+    color: #fff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  button:hover { background: #0080ff; }
+  button:disabled { background: #444; cursor: default; }
+
+  #folder-btn {
+    background: #333;
+    border: 1px solid #555;
+  }
+  #folder-btn:hover { background: #444; }
+
+  #folder-label {
+    color: #aaa;
+    font-style: italic;
+    flex: 1;
+  }
+
+  progress {
+    width: 100%;
+    height: 14px;
+    border-radius: 5px;
+    margin: 10px 0 4px;
+  }
+
+  progress::-webkit-progress-bar { background: #2d2d2d; border-radius: 5px; }
+  progress::-webkit-progress-value { background: #00aa00; border-radius: 5px; }
+
+  #status { color: #aaa; font-size: 12px; margin-bottom: 12px; }
+
+  .split {
+    display: flex;
+    gap: 12px;
+    height: 440px;
+  }
+
+  #file-list {
+    width: 320px;
+    min-width: 200px;
+    background: #2d2d2d;
+    border: 1px solid #555;
+    border-radius: 5px;
+    overflow-y: auto;
+    padding: 6px;
+  }
+
+  #file-list .file-item {
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    word-break: break-all;
+    font-size: 12px;
+    color: #90caf9;
+  }
+
+  #file-list .file-item:hover { background: #3a3a3a; }
+
+  #result-box {
+    flex: 1;
+    background: #2d2d2d;
+    border: 1px solid #555;
+    border-radius: 5px;
+    overflow-y: auto;
+    padding: 10px;
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .match-file { color: #64b5f6; }
+  .match-line { color: #a5d6a7; }
+  .match-text { color: #fff0a0; }
+  .match-sep { color: #555; }
+  .error-text { color: #ef9a9a; }
+</style>
+</head>
+<body>
+
+<h1>🔥 Advanced Local File Searcher</h1>
+
+<div class="row">
+  <label>Folder:</label>
+  <button id="folder-btn" onclick="document.getElementById('folder-input').click()">Browse</button>
+  <span id="folder-label">No folder selected</span>
+  <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
+</div>
+
+<div class="row">
+  <label>Search:</label>
+  <input type="text" id="pattern" placeholder="Enter text, regex, or URL...">
+  <select id="search-mode">
+    <option>Exact Text</option>
+    <option>Regex</option>
+    <option>URL</option>
+  </select>
+  <label style="min-width:unset; display:flex; align-items:center; gap:4px;">
+    <input type="checkbox" id="case-sensitive"> Case Sensitive
+  </label>
+</div>
+
+<div class="row">
+  <label>Extensions:</label>
+  <div class="checkboxes">
+    <label><input type="checkbox" value=".html" checked> .html</label>
+    <label><input type="checkbox" value=".py" checked> .py</label>
+    <label><input type="checkbox" value=".txt" checked> .txt</label>
+    <label><input type="checkbox" value=".js" checked> .js</label>
+    <label><input type="checkbox" value=".css"> .css</label>
+    <label><input type="checkbox" value=".json"> .json</label>
+  </div>
+</div>
+
+<div class="row">
+  <button id="search-btn" onclick="startSearch()">🔍 Start Search</button>
+  <button id="stop-btn" onclick="stopSearch()" disabled>🛑 Stop</button>
+  <button onclick="clearResults()">🧹 Clear</button>
+</div>
+
+<progress id="progress" value="0" max="100"></progress>
+<div id="status">Ready</div>
+
+<div class="split">
+  <div id="file-list"></div>
+  <div id="result-box"></div>
+</div>
+
+<script>
+let allFiles = [];
+let stopFlag = false;
+
+document.getElementById('folder-input').addEventListener('change', function () {
+  allFiles = Array.from(this.files);
+  document.getElementById('folder-label').textContent =
+    allFiles.length > 0 ? `${allFiles.length} files loaded` : 'No folder selected';
+});
+
+function getExtensions() {
+  return Array.from(document.querySelectorAll('.checkboxes input[type=checkbox]:checked'))
+    .map(cb => cb.value);
+}
+
+function matchLine(line, pattern, mode, caseSensitive) {
+  const flags = caseSensitive ? '' : 'i';
+  if (mode === 'Exact Text') {
+    return caseSensitive ? line.includes(pattern) : line.toLowerCase().includes(pattern.toLowerCase());
+  }
+  if (mode === 'Regex') {
+    try { return new RegExp(pattern, flags).test(line); } catch { return false; }
+  }
+  if (mode === 'URL') {
+    const urls = line.match(/https?:\/\/[^\s"'>]+/g) || [];
+    return urls.some(url => caseSensitive
+      ? url.includes(pattern)
+      : url.toLowerCase().includes(pattern.toLowerCase()));
+  }
+  return false;
+}
+
+async function startSearch() {
+  const pattern = document.getElementById('pattern').value.trim();
+  const mode = document.getElementById('search-mode').value;
+  const caseSensitive = document.getElementById('case-sensitive').checked;
+  const extensions = getExtensions();
+
+  if (allFiles.length === 0) { setStatus('Please select a folder first.'); return; }
+  if (!pattern) { setStatus('Please enter a search pattern.'); return; }
+  if (extensions.length === 0) { setStatus('Select at least one extension.'); return; }
+
+  clearResults();
+  stopFlag = false;
+
+  document.getElementById('search-btn').disabled = true;
+  document.getElementById('stop-btn').disabled = false;
+
+  const filtered = allFiles.filter(f => {
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    return extensions.includes(ext);
+  });
+
+  const total = filtered.length;
+  if (total === 0) { setStatus('No matching files found.'); resetButtons(); return; }
+
+  let found = 0;
+  const seenFiles = new Set();
+
+  for (let i = 0; i < filtered.length; i++) {
+    if (stopFlag) { setStatus('Search stopped.'); resetButtons(); return; }
+
+    const file = filtered[i];
+    setStatus('Scanning: ' + (file.webkitRelativePath || file.name));
+    updateProgress(Math.round((i / total) * 100));
+
+    try {
+      const text = await readFileText(file);
+      const lines = text.split('\n');
+
+      for (let ln = 0; ln < lines.length; ln++) {
+        if (stopFlag) break;
+        if (matchLine(lines[ln], pattern, mode, caseSensitive)) {
+          found++;
+          const path = file.webkitRelativePath || file.name;
+          appendResult(path, ln + 1, lines[ln].trim());
+          if (!seenFiles.has(path)) {
+            seenFiles.add(path);
+            addFileListItem(path);
+          }
+        }
+      }
+    } catch (e) {
+      appendError(file.webkitRelativePath || file.name, e.message);
+    }
+
+    // yield to keep UI responsive
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  updateProgress(100);
+  setStatus(`Search completed. Found ${found} matches.`);
+  resetButtons();
+}
+
+function stopSearch() { stopFlag = true; }
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Read error'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+function appendResult(path, lineNum, text) {
+  const box = document.getElementById('result-box');
+  box.innerHTML +=
+    `\n<span class="match-file">FILE: ${escHtml(path)}</span>\n` +
+    `<span class="match-line">LINE: ${lineNum}</span>\n` +
+    `<span class="match-text">MATCH: ${escHtml(text)}</span>\n` +
+    `<span class="match-sep">${'-'.repeat(70)}</span>\n`;
+  box.scrollTop = box.scrollHeight;
+}
+
+function appendError(path, msg) {
+  const box = document.getElementById('result-box');
+  box.innerHTML += `\n<span class="error-text">ERROR: ${escHtml(path)}\n${escHtml(msg)}</span>\n`;
+}
+
+function addFileListItem(path) {
+  const list = document.getElementById('file-list');
+  const div = document.createElement('div');
+  div.className = 'file-item';
+  div.title = path;
+  div.textContent = path.split('/').pop();
+  list.appendChild(div);
+}
+
+function clearResults() {
+  document.getElementById('result-box').innerHTML = '';
+  document.getElementById('file-list').innerHTML = '';
+  updateProgress(0);
+  setStatus('Ready');
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function updateProgress(val) { document.getElementById('progress').value = val; }
+function resetButtons() {
+  document.getElementById('search-btn').disabled = false;
+  document.getElementById('stop-btn').disabled = true;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
