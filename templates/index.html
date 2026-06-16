@@ -15,11 +15,7 @@
     padding: 20px;
   }
 
-  h1 {
-    text-align: center;
-    font-size: 22px;
-    margin-bottom: 20px;
-  }
+  h1 { text-align: center; font-size: 22px; margin-bottom: 20px; }
 
   .row {
     display: flex;
@@ -41,18 +37,9 @@
     min-width: 150px;
   }
 
-  input[type="text"]:focus, select:focus {
-    outline: none;
-    border-color: #0080ff;
-  }
+  input[type="text"]:focus, select:focus { outline: none; border-color: #0080ff; }
 
-  .checkboxes {
-    display: flex;
-    gap: 14px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
+  .checkboxes { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
   .checkboxes label { min-width: unset; color: #fff; display: flex; align-items: center; gap: 4px; }
 
   button {
@@ -65,21 +52,12 @@
     cursor: pointer;
     font-size: 14px;
   }
-
   button:hover { background: #0080ff; }
   button:disabled { background: #444; cursor: default; }
 
-  #folder-btn {
-    background: #333;
-    border: 1px solid #555;
-  }
+  #folder-btn { background: #333; border: 1px solid #555; }
   #folder-btn:hover { background: #444; }
-
-  #folder-label {
-    color: #aaa;
-    font-style: italic;
-    flex: 1;
-  }
+  #folder-label { color: #aaa; font-style: italic; flex: 1; }
 
   progress {
     width: 100%;
@@ -87,17 +65,13 @@
     border-radius: 5px;
     margin: 10px 0 4px;
   }
-
   progress::-webkit-progress-bar { background: #2d2d2d; border-radius: 5px; }
-  progress::-webkit-progress-value { background: #00aa00; border-radius: 5px; }
+  progress::-webkit-progress-value { background: #00cc55; border-radius: 5px; }
 
-  #status { color: #aaa; font-size: 12px; margin-bottom: 12px; }
+  #status { color: #aaa; font-size: 12px; margin-bottom: 4px; }
+  #worker-info { color: #555; font-size: 11px; margin-bottom: 10px; }
 
-  .split {
-    display: flex;
-    gap: 12px;
-    height: 440px;
-  }
+  .split { display: flex; gap: 12px; height: 440px; }
 
   #file-list {
     width: 320px;
@@ -109,7 +83,7 @@
     padding: 6px;
   }
 
-  #file-list .file-item {
+  .file-item {
     padding: 5px 8px;
     border-radius: 4px;
     cursor: pointer;
@@ -117,8 +91,7 @@
     font-size: 12px;
     color: #90caf9;
   }
-
-  #file-list .file-item:hover { background: #3a3a3a; }
+  .file-item:hover { background: #3a3a3a; }
 
   #result-box {
     flex: 1;
@@ -133,16 +106,101 @@
     line-height: 1.6;
   }
 
-  .match-file { color: #64b5f6; }
-  .match-line { color: #a5d6a7; }
-  .match-text { color: #fff0a0; }
-  .match-sep { color: #555; }
-  .error-text { color: #ef9a9a; }
+  .mf { color: #64b5f6; }
+  .ml { color: #a5d6a7; }
+  .mt { color: #fff0a0; }
+  .ms { color: #444; }
+  .me { color: #ef9a9a; }
 </style>
 </head>
 <body>
 
-<h1>🔥 Advanced Local File Searcher</h1>
+<h1>&#x26A1; Advanced Local File Searcher</h1>
+
+<!--
+  Worker source is stored in this inert script tag.
+  The main thread reads its textContent, wraps it in a Blob, and spawns N workers.
+-->
+<script type="text/worker-code" id="worker-src">
+self.onmessage = function(e) {
+  var files         = e.data.files;
+  var pattern       = e.data.pattern;
+  var mode          = e.data.mode;
+  var caseSensitive = e.data.caseSensitive;
+
+  var lPat    = caseSensitive ? pattern : pattern.toLowerCase();
+  var lineRe  = null;
+  var globalRe = null;
+
+  if (mode === 'Regex') {
+    try {
+      lineRe   = new RegExp(pattern, caseSensitive ? ''  : 'i');
+      globalRe = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+    } catch(ex) { lineRe = null; }
+  }
+
+  function processFile(file) {
+    return file.text().then(function(text) {
+      var path    = file.webkitRelativePath || file.name;
+      var matches = [];
+
+      if (mode === 'Exact Text') {
+        // Full-file pre-check before splitting (avoids split cost on misses)
+        var haystack = caseSensitive ? text : text.toLowerCase();
+        if (haystack.includes(lPat)) {
+          var lines = text.split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            var l = caseSensitive ? lines[i] : lines[i].toLowerCase();
+            if (l.includes(lPat)) matches.push([i + 1, lines[i].trimEnd()]);
+          }
+        }
+
+      } else if (mode === 'Regex' && lineRe) {
+        globalRe.lastIndex = 0;
+        if (globalRe.test(text)) {
+          var lines = text.split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            if (lineRe.test(lines[i])) matches.push([i + 1, lines[i].trimEnd()]);
+          }
+        }
+
+      } else if (mode === 'URL') {
+        var lines = text.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          var urls = lines[i].match(/https?:\/\/[^\s"'>]+/g) || [];
+          for (var u = 0; u < urls.length; u++) {
+            var cmp = caseSensitive ? urls[u] : urls[u].toLowerCase();
+            if (cmp.includes(lPat)) { matches.push([i + 1, lines[i].trimEnd()]); break; }
+          }
+        }
+      }
+
+      if (matches.length) self.postMessage({ type: 'hit', path: path, matches: matches });
+      self.postMessage({ type: 'tick' });
+    }).catch(function(err) {
+      var path = file.webkitRelativePath || file.name;
+      self.postMessage({ type: 'err', path: path, msg: err.message });
+      self.postMessage({ type: 'tick' });
+    });
+  }
+
+  // Process files in parallel batches of 8 within each worker
+  var BATCH = 8;
+  var idx   = 0;
+
+  function runBatch() {
+    if (idx >= files.length) {
+      self.postMessage({ type: 'done' });
+      return;
+    }
+    var slice   = files.slice(idx, idx + BATCH);
+    idx        += BATCH;
+    Promise.all(slice.map(processFile)).then(runBatch);
+  }
+
+  runBatch();
+};
+</script>
 
 <div class="row">
   <label>Folder:</label>
@@ -153,13 +211,13 @@
 
 <div class="row">
   <label>Search:</label>
-  <input type="text" id="pattern" placeholder="Enter text, regex, or URL...">
+  <input type="text" id="pattern" placeholder="Enter text, regex, or URL..." onkeydown="if(event.key==='Enter')startSearch()">
   <select id="search-mode">
     <option>Exact Text</option>
     <option>Regex</option>
     <option>URL</option>
   </select>
-  <label style="min-width:unset; display:flex; align-items:center; gap:4px;">
+  <label style="min-width:unset;display:flex;align-items:center;gap:4px;">
     <input type="checkbox" id="case-sensitive"> Case Sensitive
   </label>
 </div>
@@ -177,13 +235,14 @@
 </div>
 
 <div class="row">
-  <button id="search-btn" onclick="startSearch()">🔍 Start Search</button>
-  <button id="stop-btn" onclick="stopSearch()" disabled>🛑 Stop</button>
-  <button onclick="clearResults()">🧹 Clear</button>
+  <button id="search-btn" onclick="startSearch()">&#x26A1; Start Search</button>
+  <button id="stop-btn" onclick="stopSearch()" disabled>&#x1F6D1; Stop</button>
+  <button onclick="clearResults()">&#x1F9F9; Clear</button>
 </div>
 
 <progress id="progress" value="0" max="100"></progress>
 <div id="status">Ready</div>
+<div id="worker-info"></div>
 
 <div class="split">
   <div id="file-list"></div>
@@ -191,151 +250,204 @@
 </div>
 
 <script>
-let allFiles = [];
-let stopFlag = false;
+'use strict';
+
+var allFiles      = [];
+var activeWorkers = [];
+var NUM_WORKERS   = Math.min(navigator.hardwareConcurrency || 4, 8);
 
 document.getElementById('folder-input').addEventListener('change', function () {
   allFiles = Array.from(this.files);
   document.getElementById('folder-label').textContent =
-    allFiles.length > 0 ? `${allFiles.length} files loaded` : 'No folder selected';
+    allFiles.length ? allFiles.length + ' files loaded' : 'No folder selected';
+  document.getElementById('worker-info').textContent =
+    'Ready — ' + NUM_WORKERS + ' parallel workers (CPU cores: ' + (navigator.hardwareConcurrency || '?') + ')';
 });
 
 function getExtensions() {
   return Array.from(document.querySelectorAll('.checkboxes input[type=checkbox]:checked'))
-    .map(cb => cb.value);
+    .map(function(cb) { return cb.value; });
 }
 
-function matchLine(line, pattern, mode, caseSensitive) {
-  const flags = caseSensitive ? '' : 'i';
-  if (mode === 'Exact Text') {
-    return caseSensitive ? line.includes(pattern) : line.toLowerCase().includes(pattern.toLowerCase());
-  }
-  if (mode === 'Regex') {
-    try { return new RegExp(pattern, flags).test(line); } catch { return false; }
-  }
-  if (mode === 'URL') {
-    const urls = line.match(/https?:\/\/[^\s"'>]+/g) || [];
-    return urls.some(url => caseSensitive
-      ? url.includes(pattern)
-      : url.toLowerCase().includes(pattern.toLowerCase()));
-  }
-  return false;
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-async function startSearch() {
-  const pattern = document.getElementById('pattern').value.trim();
-  const mode = document.getElementById('search-mode').value;
-  const caseSensitive = document.getElementById('case-sensitive').checked;
-  const extensions = getExtensions();
+function setStatus(msg)      { document.getElementById('status').textContent = msg; }
+function updateProgress(val) { document.getElementById('progress').value = val; }
 
-  if (allFiles.length === 0) { setStatus('Please select a folder first.'); return; }
-  if (!pattern) { setStatus('Please enter a search pattern.'); return; }
-  if (extensions.length === 0) { setStatus('Select at least one extension.'); return; }
-
-  clearResults();
-  stopFlag = false;
-
-  document.getElementById('search-btn').disabled = true;
-  document.getElementById('stop-btn').disabled = false;
-
-  const filtered = allFiles.filter(f => {
-    const ext = '.' + f.name.split('.').pop().toLowerCase();
-    return extensions.includes(ext);
-  });
-
-  const total = filtered.length;
-  if (total === 0) { setStatus('No matching files found.'); resetButtons(); return; }
-
-  let found = 0;
-  const seenFiles = new Set();
-
-  for (let i = 0; i < filtered.length; i++) {
-    if (stopFlag) { setStatus('Search stopped.'); resetButtons(); return; }
-
-    const file = filtered[i];
-    setStatus('Scanning: ' + (file.webkitRelativePath || file.name));
-    updateProgress(Math.round((i / total) * 100));
-
-    try {
-      const text = await readFileText(file);
-      const lines = text.split('\n');
-
-      for (let ln = 0; ln < lines.length; ln++) {
-        if (stopFlag) break;
-        if (matchLine(lines[ln], pattern, mode, caseSensitive)) {
-          found++;
-          const path = file.webkitRelativePath || file.name;
-          appendResult(path, ln + 1, lines[ln].trim());
-          if (!seenFiles.has(path)) {
-            seenFiles.add(path);
-            addFileListItem(path);
-          }
-        }
-      }
-    } catch (e) {
-      appendError(file.webkitRelativePath || file.name, e.message);
-    }
-
-    // yield to keep UI responsive
-    await new Promise(r => setTimeout(r, 0));
-  }
-
-  updateProgress(100);
-  setStatus(`Search completed. Found ${found} matches.`);
-  resetButtons();
-}
-
-function stopSearch() { stopFlag = true; }
-
-function readFileText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => resolve(e.target.result);
-    reader.onerror = () => reject(new Error('Read error'));
-    reader.readAsText(file, 'utf-8');
-  });
-}
-
-function appendResult(path, lineNum, text) {
-  const box = document.getElementById('result-box');
-  box.innerHTML +=
-    `\n<span class="match-file">FILE: ${escHtml(path)}</span>\n` +
-    `<span class="match-line">LINE: ${lineNum}</span>\n` +
-    `<span class="match-text">MATCH: ${escHtml(text)}</span>\n` +
-    `<span class="match-sep">${'-'.repeat(70)}</span>\n`;
-  box.scrollTop = box.scrollHeight;
-}
-
-function appendError(path, msg) {
-  const box = document.getElementById('result-box');
-  box.innerHTML += `\n<span class="error-text">ERROR: ${escHtml(path)}\n${escHtml(msg)}</span>\n`;
-}
-
-function addFileListItem(path) {
-  const list = document.getElementById('file-list');
-  const div = document.createElement('div');
-  div.className = 'file-item';
-  div.title = path;
-  div.textContent = path.split('/').pop();
-  list.appendChild(div);
+function resetButtons() {
+  document.getElementById('search-btn').disabled = false;
+  document.getElementById('stop-btn').disabled   = true;
 }
 
 function clearResults() {
   document.getElementById('result-box').innerHTML = '';
-  document.getElementById('file-list').innerHTML = '';
+  document.getElementById('file-list').innerHTML  = '';
   updateProgress(0);
   setStatus('Ready');
 }
 
-function setStatus(msg) { document.getElementById('status').textContent = msg; }
-function updateProgress(val) { document.getElementById('progress').value = val; }
-function resetButtons() {
-  document.getElementById('search-btn').disabled = false;
-  document.getElementById('stop-btn').disabled = true;
+function stopSearch() {
+  for (var i = 0; i < activeWorkers.length; i++) {
+    try { activeWorkers[i].terminate(); } catch(e) {}
+  }
+  activeWorkers = [];
+  setStatus('Search stopped.');
+  resetButtons();
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function startSearch() {
+  var pattern       = document.getElementById('pattern').value.trim();
+  var mode          = document.getElementById('search-mode').value;
+  var caseSensitive = document.getElementById('case-sensitive').checked;
+  var extensions    = getExtensions();
+
+  if (!allFiles.length)   { setStatus('Please select a folder first.'); return; }
+  if (!pattern)            { setStatus('Please enter a search pattern.'); return; }
+  if (!extensions.length)  { setStatus('Select at least one extension.'); return; }
+
+  clearResults();
+  activeWorkers = [];
+
+  document.getElementById('search-btn').disabled = true;
+  document.getElementById('stop-btn').disabled   = false;
+
+  // Filter by extension (fast lastIndexOf check, avoids split+pop)
+  var filtered = allFiles.filter(function(f) {
+    var dot = f.name.lastIndexOf('.');
+    if (dot < 0) return false;
+    return extensions.indexOf(f.name.slice(dot).toLowerCase()) >= 0;
+  });
+
+  var total = filtered.length;
+  if (!total) { setStatus('No files match selected extensions.'); resetButtons(); return; }
+
+  setStatus('Starting ' + NUM_WORKERS + ' workers on ' + total + ' files...');
+
+  // Round-robin distribute files across workers
+  var chunks = [];
+  for (var w = 0; w < NUM_WORKERS; w++) chunks.push([]);
+  for (var i = 0; i < filtered.length; i++) chunks[i % NUM_WORKERS].push(filtered[i]);
+
+  var processed   = 0;
+  var found       = 0;
+  var doneWorkers = 0;
+  var seenFiles   = Object.create(null);
+  var htmlBuf     = [];
+  var filesBuf    = [];
+  var rafPending  = false;
+  var t0          = performance.now();
+  var lastStatus  = t0;
+
+  function scheduleFlush() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(flush);
+  }
+
+  function flush() {
+    rafPending = false;
+
+    if (htmlBuf.length) {
+      document.getElementById('result-box').insertAdjacentHTML('beforeend', htmlBuf.join(''));
+      htmlBuf = [];
+      var rb = document.getElementById('result-box');
+      rb.scrollTop = rb.scrollHeight;
+    }
+
+    if (filesBuf.length) {
+      var frag = document.createDocumentFragment();
+      for (var k = 0; k < filesBuf.length; k++) {
+        var d = document.createElement('div');
+        d.className = 'file-item';
+        d.title = filesBuf[k];
+        var parts = filesBuf[k].split(/[/\\]/);
+        d.textContent = parts[parts.length - 1];
+        frag.appendChild(d);
+      }
+      document.getElementById('file-list').appendChild(frag);
+      filesBuf = [];
+    }
+
+    updateProgress(Math.round((processed / total) * 100));
+  }
+
+  // Build worker from embedded script tag — no separate file needed
+  var workerCode = document.getElementById('worker-src').textContent;
+  var blob       = new Blob([workerCode], { type: 'application/javascript' });
+  var blobUrl    = URL.createObjectURL(blob);
+
+  for (var w = 0; w < NUM_WORKERS; w++) {
+    if (!chunks[w].length) {
+      doneWorkers++;
+      if (doneWorkers === NUM_WORKERS) finish();
+      continue;
+    }
+
+    (function launchWorker(chunk) {
+      var worker = new Worker(blobUrl);
+      activeWorkers.push(worker);
+
+      worker.onmessage = function(e) {
+        var d = e.data;
+
+        if (d.type === 'hit') {
+          found += d.matches.length;
+          if (!seenFiles[d.path]) {
+            seenFiles[d.path] = true;
+            filesBuf.push(d.path);
+          }
+          for (var m = 0; m < d.matches.length; m++) {
+            htmlBuf.push(
+              '\n<span class="mf">FILE: ' + escHtml(d.path) + '</span>\n' +
+              '<span class="ml">LINE: ' + d.matches[m][0] + '</span>\n' +
+              '<span class="mt">MATCH: ' + escHtml(d.matches[m][1]) + '</span>\n' +
+              '<span class="ms">' + '\u2500'.repeat(70) + '</span>\n'
+            );
+          }
+          scheduleFlush();
+
+        } else if (d.type === 'err') {
+          htmlBuf.push('\n<span class="me">ERROR: ' + escHtml(d.path) + '\n' + escHtml(d.msg) + '</span>\n');
+          scheduleFlush();
+
+        } else if (d.type === 'tick') {
+          processed++;
+          var now = performance.now();
+          if (now - lastStatus > 80) {
+            lastStatus = now;
+            var elapsed = ((now - t0) / 1000).toFixed(1);
+            setStatus('Searching\u2026 ' + processed + '/' + total + ' files \u2014 ' + found + ' matches \u2014 ' + elapsed + 's');
+            scheduleFlush();
+          }
+
+        } else if (d.type === 'done') {
+          worker.terminate();
+          doneWorkers++;
+          if (doneWorkers === NUM_WORKERS) finish();
+        }
+      };
+
+      worker.onerror = function() {
+        worker.terminate();
+        doneWorkers++;
+        if (doneWorkers === NUM_WORKERS) finish();
+      };
+
+      worker.postMessage({ files: chunk, pattern: pattern, mode: mode, caseSensitive: caseSensitive });
+    })(chunks[w]);
+  }
+
+  function finish() {
+    URL.revokeObjectURL(blobUrl);
+    activeWorkers = [];
+    flush();
+    updateProgress(100);
+    var elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+    setStatus('Done in ' + elapsed + 's \u2014 ' + found + ' matches in ' + total + ' files (' + NUM_WORKERS + ' workers)');
+    resetButtons();
+  }
 }
 </script>
 </body>
